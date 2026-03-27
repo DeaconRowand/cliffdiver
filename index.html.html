@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Cliff Dive - Fixed Waves</title>
+<style>
+  body { margin:0; background:#fff; overflow:hidden; }
+  canvas { display:block; cursor:pointer; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<script>
+const c = document.getElementById("c");
+const ctx = c.getContext("2d");
+
+let cameraY = 0;
+let baseWaterY;
+
+// ensure canvas + water always correct
+function resize(){
+  c.width = innerWidth;
+  c.height = innerHeight;
+  baseWaterY = c.height * 0.625; // ALWAYS stays big
+}
+resize();
+window.addEventListener("resize", resize);
+
+const MAX_LEVEL = 5;
+
+let level = 1;
+let totalScore = 0;
+let multiplier = 1;
+
+let player, particles, ripples;
+let flips, score, judges, msg;
+let spaceHeld = false;
+let slowmo = 1;
+
+let restartBtn = {x: 20, y: 20, w:140, h:40};
+
+function beep(f,t){
+  let a=new (window.AudioContext||window.webkitAudioContext)();
+  let o=a.createOscillator();
+  o.frequency.value=f;
+  o.type="square";
+  o.connect(a.destination);
+  o.start();
+  setTimeout(()=>o.stop(),t);
+}
+
+function fullReset(){
+  level = 1;
+  totalScore = 0;
+  multiplier = 1;
+  resetLevel();
+}
+
+function resetLevel(){
+  let heightOffset = level * 25;
+
+  player = {
+    x: 220,
+    y: baseWaterY - 120 - heightOffset,
+    vx: 3.5 + level*0.2,
+    vy: 0,
+    rot: 0,
+    jumped:false,
+    done:false
+  };
+
+  particles=[];
+  ripples=[];
+  flips=0;
+  score=0;
+  judges=[];
+  msg = level <= MAX_LEVEL ? "Level " + level + " - SPACE" : "GAME COMPLETE";
+  slowmo = 1;
+}
+resetLevel();
+
+document.addEventListener("keydown",e=>{
+  if(e.code==="Space" && level <= MAX_LEVEL){
+    spaceHeld=true;
+    if(!player.jumped){
+      player.vy=-12 - level*0.3;
+      player.jumped=true;
+      msg="";
+      beep(200,100);
+    }
+  }
+});
+
+document.addEventListener("keyup",e=>{
+  if(e.code==="Space") spaceHeld=false;
+});
+
+c.addEventListener("click", e=>{
+  let mx = e.clientX;
+  let my = e.clientY;
+
+  if(mx > restartBtn.x && mx < restartBtn.x+restartBtn.w &&
+     my > restartBtn.y && my < restartBtn.y+restartBtn.h){
+    fullReset();
+  }
+});
+
+function update(){
+  let dt = slowmo;
+
+  if(player.jumped && !player.done && level <= MAX_LEVEL){
+    player.vy+=0.5*dt;
+    player.y+=player.vy*dt;
+    player.x+=player.vx*dt;
+
+    if(spaceHeld) player.rot+=0.22*dt;
+
+    flips = Math.floor(player.rot/(Math.PI*2));
+
+    cameraY = player.y - c.height * 0.4;
+    let maxCamera = baseWaterY - c.height + 100;
+    cameraY = Math.min(cameraY, maxCamera);
+
+    if(player.y >= baseWaterY){
+      player.done=true;
+
+      let a = player.rot%(Math.PI*2);
+      let straight = Math.min(
+        Math.abs(a),
+        Math.abs(a-Math.PI),
+        Math.abs(a-Math.PI*2)
+      );
+
+      if(straight < 0.6){
+        score = Math.min(5, Math.floor((0.6-straight)*8)+1);
+
+        multiplier += 0.5;
+        totalScore += Math.floor(score * multiplier);
+
+        msg="Clean! +" + score + " x" + multiplier.toFixed(1);
+
+        judges = Array.from({length:5},()=> (score+flips/2+Math.random()*2).toFixed(1));
+
+        slowmo = 0.3;
+        setTimeout(()=>slowmo=1,800);
+
+        beep(700,150);
+
+        level++;
+      } else {
+        msg="FLOP!";
+        multiplier = 1;
+        judges=[0,0,0,0,0];
+        beep(80,300);
+      }
+
+      for(let i=0;i<60;i++){
+        particles.push({
+          x:player.x,
+          y:baseWaterY,
+          vx:(Math.random()-0.5)*10,
+          vy:(Math.random()*-8),
+          life:60
+        });
+      }
+
+      ripples.push({x:player.x, r:10, life:60});
+
+      setTimeout(resetLevel,2000);
+    }
+  }
+
+  particles.forEach(p=>{
+    p.x+=p.vx;
+    p.y+=p.vy;
+    p.vy+=0.4;
+    p.life--;
+  });
+  particles=particles.filter(p=>p.life>0);
+
+  ripples.forEach(r=>{
+    r.r+=3;
+    r.life--;
+  });
+  ripples=ripples.filter(r=>r.life>0);
+}
+
+function drawPlayer(x,y,r){
+  ctx.save();
+  ctx.translate(x, y - cameraY);
+  ctx.rotate(r);
+
+  ctx.fillStyle="black";
+  ctx.fillRect(-6,-30,12,12);
+  ctx.fillRect(-4,-18,8,20);
+  ctx.fillRect(-6,2,4,12);
+  ctx.fillRect(2,2,4,12);
+  ctx.fillRect(-12,-15,8,4);
+  ctx.fillRect(4,-15,8,4);
+
+  ctx.restore();
+}
+
+function draw(){
+  ctx.clearRect(0,0,c.width,c.height);
+
+  ctx.fillStyle="black";
+  ctx.beginPath();
+  ctx.moveTo(0, baseWaterY - cameraY);
+  for(let i=0;i<c.width;i+=20){
+    ctx.lineTo(i, baseWaterY - cameraY + Math.sin(i*0.05)*10);
+  }
+  ctx.lineTo(c.width,c.height);
+  ctx.lineTo(0,c.height);
+  ctx.fill();
+
+  let cliffHeight = 160 + level*12;
+
+  ctx.beginPath();
+  ctx.moveTo(0, baseWaterY - cliffHeight - cameraY);
+  ctx.lineTo(180, baseWaterY - cliffHeight - cameraY);
+  ctx.lineTo(260, baseWaterY - cliffHeight - cameraY);
+  ctx.lineTo(220, baseWaterY + 2 - cameraY);
+  ctx.lineTo(0, baseWaterY + 2 - cameraY);
+  ctx.closePath();
+  ctx.fill();
+
+  if(level <= MAX_LEVEL){
+    drawPlayer(player.x, player.y, player.rot);
+  }
+
+  particles.forEach(p=>{
+    ctx.fillRect(p.x, p.y - cameraY, 3,3);
+  });
+
+  ripples.forEach(r=>{
+    ctx.beginPath();
+    ctx.arc(r.x, baseWaterY - cameraY, r.r, 0, Math.PI*2);
+    ctx.stroke();
+  });
+
+  let uiX = c.width - 260;
+  ctx.font="20px monospace";
+  ctx.fillText("Score: "+totalScore, uiX,40);
+  ctx.fillText("Level: "+Math.min(level, MAX_LEVEL), uiX,70);
+  ctx.fillText("Multiplier: x"+multiplier.toFixed(1), uiX,100);
+  ctx.fillText(msg, uiX,130);
+
+  ctx.strokeRect(restartBtn.x, restartBtn.y, restartBtn.w, restartBtn.h);
+  ctx.fillText("RESTART", restartBtn.x+20, restartBtn.y+25);
+
+  if(level > MAX_LEVEL){
+    ctx.font="30px monospace";
+    ctx.fillText("FINAL SCORE: " + totalScore, uiX,200);
+  }
+}
+
+function loop(){
+  update();
+  draw();
+  requestAnimationFrame(loop);
+}
+loop();
+</script>
+</body>
+</html>
